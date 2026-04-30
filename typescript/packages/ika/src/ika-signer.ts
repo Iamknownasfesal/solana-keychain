@@ -12,7 +12,7 @@ import {
     ZeroTrustDWallet,
 } from '@ika.xyz/sdk';
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
-import { Transaction, TransactionObjectArgument } from '@mysten/sui/transactions';
+import { coinWithBalance, Transaction, TransactionObjectArgument } from '@mysten/sui/transactions';
 import { Address, address as addressFromBase58, getAddressDecoder } from '@solana/addresses';
 import {
     assertSignatureValid,
@@ -226,7 +226,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         });
         const verifiedPresignCap = ikaTx.verifyPresignCap({ presign });
 
-        const ikaCoin = await this.#buildIkaCoin(suiTx);
+        const ikaCoin = this.#buildIkaCoin(suiTx);
 
         await ikaTx.requestSign({
             dWallet: this.dWallet,
@@ -313,7 +313,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             ikaClient: this.ikaClient,
             transaction: presignTx,
         });
-        const ikaCoin = await this.#buildIkaCoin(presignTx);
+        const ikaCoin = this.#buildIkaCoin(presignTx);
         const unverifiedPresignCap = ikaTx.requestGlobalPresign({
             curve: Curve.ED25519,
             dwalletNetworkEncryptionKeyId: networkKey.id,
@@ -338,40 +338,22 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
     /**
      * Build the IKA coin argument used to pay protocol fees in a single PTB.
      *
-     * Default behavior (no `ikaCoin` config) is to query the wallet for IKA
-     * coins via `suiClient.getCoins`, merge them in-PTB if there are several
-     * (so the move call sees a single coin with the wallet's full balance),
-     * and return the merged coin. Move calls take the coin by `&mut`, so
-     * leftover balance stays in the same on-chain object.
+     * Default behavior (no `ikaCoin` config) builds a coin via the
+     * `coinWithBalance` intent with `balance: 0n` — Sui auto-resolves a coin
+     * of the IKA type from the sender's wallet, merging/splitting as needed.
+     * Mainnet callers must override with a non-zero balance covering the
+     * per-call fee, or pass `{ kind: 'object' }` / `{ kind: 'callback' }`.
      */
-    async #buildIkaCoin(tx: Transaction): Promise<TransactionObjectArgument> {
-        const source = this.ikaCoinSource;
-        if (source?.kind === 'object') {
+    #buildIkaCoin(tx: Transaction): TransactionObjectArgument {
+        const source = this.ikaCoinSource ?? { balance: 0n, kind: 'with-balance' };
+        if (source.kind === 'object') {
             return tx.object(source.coinId);
         }
-        if (source?.kind === 'callback') {
+        if (source.kind === 'callback') {
             return source.build(tx);
         }
-
-        const owner = this.suiSigner.toSuiAddress();
         const coinType = `${this.ikaClient.ikaConfig.packages.ikaPackage}::ika::IKA`;
-        const { data: coins } = await this.suiClient.getCoins({ coinType, owner });
-        const [head, ...rest] = coins;
-        if (!head) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                coinType,
-                message: `Wallet ${owner} holds no ${coinType} coins to pay Ika protocol fees with`,
-                owner,
-            });
-        }
-        const primary = tx.object(head.coinObjectId);
-        if (rest.length > 0) {
-            tx.mergeCoins(
-                primary,
-                rest.map(coin => tx.object(coin.coinObjectId)),
-            );
-        }
-        return primary;
+        return tx.add(coinWithBalance({ balance: source.balance, type: coinType }));
     }
 
     /**

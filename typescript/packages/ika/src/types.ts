@@ -53,6 +53,19 @@ export type IkaPresignMode =
  */
 export type IkaCoinSource =
     | {
+          /**
+           * Build the IKA coin via the `coinWithBalance` intent from
+           * `@mysten/sui/transactions`. The Sui resolver auto-discovers IKA
+           * coins owned by the sender (no pagination) and merges/splits as
+           * needed to satisfy `balance`. Pick a value at least as large as
+           * one signing-fee charge for the network. `0n` is fine on networks
+           * with zero Ika fees (testnet, devnet); mainnet callers must pass
+           * a value covering the actual per-call fee.
+           */
+          balance: bigint | number;
+          kind: 'with-balance';
+      }
+    | {
           build: (
               tx: import('@mysten/sui/transactions').Transaction,
           ) => import('@mysten/sui/transactions').TransactionObjectArgument;
@@ -91,13 +104,11 @@ export interface IkaSignerConfig {
      * How to source the IKA coin used to pay protocol fees in each PTB
      * (presign + sign txs).
      *
-     * When omitted, the signer auto-discovers IKA coins owned by
-     * `suiSigner.toSuiAddress()` via `suiClient.getCoins`, merges them
-     * in-PTB if there are several, and uses the result as the fee coin.
-     * Throws if the wallet holds no IKA.
-     *
-     * Override with `{ kind: 'object' }` to pin a specific coin or with
-     * `{ kind: 'callback' }` to integrate a custom coin-management strategy.
+     * When omitted, defaults to `{ kind: 'with-balance', balance: 0n }` —
+     * which works on networks where Ika fees are zero (testnet, devnet).
+     * On mainnet you MUST set this to a non-zero balance covering the
+     * per-call fee, or pass an explicit coin via `{ kind: 'object' }` /
+     * `{ kind: 'callback' }`.
      */
     ikaCoin?: IkaCoinSource;
     /** Default: `{ kind: 'per-sign-global' }`. */
