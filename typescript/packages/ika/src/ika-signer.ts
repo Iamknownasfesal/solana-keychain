@@ -171,7 +171,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
         const result: SignatureDictionary[] = [];
         for (const message of messages) {
-            const signature = await this.#signBytes(message.content);
+            const signature = await this._signBytes(message.content);
             await assertSignatureValid({
                 data: message.content,
                 signature,
@@ -188,7 +188,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         const result: SignatureDictionary[] = [];
         for (const transaction of transactions) {
             const messageBytes = new Uint8Array(transaction.messageBytes);
-            const signature = await this.#signBytes(messageBytes);
+            const signature = await this._signBytes(messageBytes);
             await assertSignatureValid({
                 data: messageBytes,
                 signature,
@@ -212,9 +212,9 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
      * Run the full Ika sign flow for a single message and return the raw
      * 64-byte Ed25519 signature.
      */
-    async #signBytes(message: Uint8Array): Promise<SignatureBytes> {
-        const presign = await this.#resolvePresign();
-        const shareInputs = await this.#requestSignShareInputs();
+    private async _signBytes(message: Uint8Array): Promise<SignatureBytes> {
+        const presign = await this._resolvePresign();
+        const shareInputs = await this._requestSignShareInputs();
 
         const suiTx = new Transaction();
         const ikaTx = new IkaTransaction({
@@ -232,7 +232,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         });
         const verifiedPresignCap = ikaTx.verifyPresignCap({ presign });
 
-        const ikaCoin = this.#buildIkaCoin(suiTx);
+        const ikaCoin = this._buildIkaCoin(suiTx);
 
         await ikaTx.requestSign({
             dWallet: this.dWallet,
@@ -247,7 +247,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             suiCoin: suiTx.gas,
         });
 
-        const signId = await this.#executeAndExtractEventId(suiTx, 'SignRequestEvent', 'sign_id');
+        const signId = await this._executeAndExtractEventId(suiTx, 'SignRequestEvent', 'sign_id');
 
         const signObject = await this.ikaClient.getSignInParticularState(
             signId,
@@ -277,7 +277,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
      * Resolve the named arguments `IkaTransaction.requestSign` uses to
      * auto-detect which signing path to take (encrypted / explicit / public).
      */
-    async #requestSignShareInputs(): Promise<{
+    private async _requestSignShareInputs(): Promise<{
         encryptedUserSecretKeyShare?: EncryptedUserSecretKeyShare;
         publicOutput?: Uint8Array;
         secretShare?: Uint8Array;
@@ -300,7 +300,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         }
     }
 
-    async #resolvePresign(): Promise<Presign> {
+    private async _resolvePresign(): Promise<Presign> {
         if (this.presignMode.kind === 'single-provided') {
             if (this.providedPresignConsumed) {
                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -319,7 +319,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             ikaClient: this.ikaClient,
             transaction: presignTx,
         });
-        const ikaCoin = this.#buildIkaCoin(presignTx);
+        const ikaCoin = this._buildIkaCoin(presignTx);
         const unverifiedPresignCap = ikaTx.requestGlobalPresign({
             curve: Curve.ED25519,
             dwalletNetworkEncryptionKeyId: networkKey.id,
@@ -333,7 +333,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         const senderAddress = this.suiSigner.toSuiAddress();
         presignTx.transferObjects([unverifiedPresignCap], senderAddress);
 
-        const presignId = await this.#executeAndExtractEventId(presignTx, 'PresignRequestEvent', 'presign_id');
+        const presignId = await this._executeAndExtractEventId(presignTx, 'PresignRequestEvent', 'presign_id');
 
         return await this.ikaClient.getPresignInParticularState(presignId, 'Completed', {
             interval: this.presignPollIntervalMs,
@@ -349,7 +349,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
      * auto-resolves IKA coins from the sender's wallet and merges/splits to
      * satisfy the budget. Tighten or loosen via `ikaCoin`.
      */
-    #buildIkaCoin(tx: Transaction): TransactionObjectArgument {
+    private _buildIkaCoin(tx: Transaction): TransactionObjectArgument {
         const source = this.ikaCoinSource ?? { balance: DEFAULT_IKA_FEE_BALANCE, kind: 'with-balance' };
         if (source.kind === 'object') {
             return tx.object(source.coinId);
@@ -366,7 +366,11 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
      * the resulting events to find the named MPC event and pull `idField` out
      * of its parsed JSON.
      */
-    async #executeAndExtractEventId(suiTx: Transaction, eventTypeSubstring: string, idField: string): Promise<string> {
+    private async _executeAndExtractEventId(
+        suiTx: Transaction,
+        eventTypeSubstring: string,
+        idField: string,
+    ): Promise<string> {
         let result;
         try {
             result = await this.suiClient.signAndExecuteTransaction({
