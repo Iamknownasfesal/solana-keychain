@@ -235,7 +235,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         });
         const verifiedPresignCap = ikaTx.verifyPresignCap({ presign });
 
-        const ikaCoin = this._buildIkaCoin(suiTx);
+        const { coin: ikaCoin, isFresh: ikaCoinIsFresh } = this._buildIkaCoin(suiTx);
 
         await ikaTx.requestSign({
             dWallet: this.dWallet,
@@ -249,6 +249,13 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             signatureScheme: SignatureAlgorithm.EdDSA,
             suiCoin: suiTx.gas,
         });
+
+        // `request_sign` takes ikaCoin by `&mut`; a fresh coin (from
+        // coinWithBalance / callback) is left orphaned on the PTB stack and
+        // must be transferred before tx end.
+        if (ikaCoinIsFresh) {
+            suiTx.transferObjects([ikaCoin], this.suiSigner.toSuiAddress());
+        }
 
         const signEvent = await this._executeAndExtractEvent(
             suiTx,
@@ -326,7 +333,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             ikaClient: this.ikaClient,
             transaction: presignTx,
         });
-        const ikaCoin = this._buildIkaCoin(presignTx);
+        const { coin: ikaCoin, isFresh: ikaCoinIsFresh } = this._buildIkaCoin(presignTx);
         const unverifiedPresignCap = ikaTx.requestGlobalPresign({
             curve: Curve.ED25519,
             dwalletNetworkEncryptionKeyId: networkKey.id,
@@ -334,11 +341,14 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             signatureAlgorithm: SignatureAlgorithm.EdDSA,
             suiCoin: presignTx.gas,
         });
-        // The cap object must be either consumed in-PTB or transferred to the
-        // sender so it persists. Transfer it to the signer address; the next
-        // sign tx will re-fetch + verify it.
+        // `request_global_presign` takes ikaCoin by `&mut` and the cap is a
+        // returned value. Both must be drained from the PTB stack: transfer
+        // them back to the sender (the next sign tx re-fetches + verifies the
+        // cap; the leftover IKA preserves the unspent fee budget).
         const senderAddress = this.suiSigner.toSuiAddress();
-        presignTx.transferObjects([unverifiedPresignCap], senderAddress);
+        const presignTransfers: TransactionObjectArgument[] = [unverifiedPresignCap];
+        if (ikaCoinIsFresh) presignTransfers.push(ikaCoin);
+        presignTx.transferObjects(presignTransfers, senderAddress);
 
         const presignEvent = await this._executeAndExtractEvent(
             presignTx,
@@ -395,17 +405,26 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
      * `coinWithBalance` intent with `balance: 5 IKA` (5 * 10^9) — Sui
      * auto-resolves IKA coins from the sender's wallet and merges/splits to
      * satisfy the budget. Tighten or loosen via `ikaCoin`.
+     *
+     * `isFresh` is true when the coin is a freshly-created PTB value (from
+     * `coinWithBalance` or a caller `callback`). Move calls take the IKA coin
+     * by `&mut`, so a fresh value is left orphaned on the PTB stack after the
+     * call and must be transferred (or destroyed) before tx end. Existing
+     * on-chain coins (`object` source) are auto-returned to their owner.
      */
-    private _buildIkaCoin(tx: Transaction): TransactionObjectArgument {
+    private _buildIkaCoin(tx: Transaction): { coin: TransactionObjectArgument; isFresh: boolean } {
         const source = this.ikaCoinSource ?? { balance: DEFAULT_IKA_FEE_BALANCE, kind: 'with-balance' };
         if (source.kind === 'object') {
-            return tx.object(source.coinId);
+            return { coin: tx.object(source.coinId), isFresh: false };
         }
         if (source.kind === 'callback') {
-            return source.build(tx);
+            return { coin: source.build(tx), isFresh: true };
         }
         const coinType = `${this.ikaClient.ikaConfig.packages.ikaPackage}::ika::IKA`;
-        return tx.add(coinWithBalance({ balance: source.balance, type: coinType }));
+        return {
+            coin: tx.add(coinWithBalance({ balance: source.balance, type: coinType })),
+            isFresh: true,
+        };
     }
 
     /**
