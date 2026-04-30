@@ -58,9 +58,7 @@ export type IkaCoinSource =
            * `@mysten/sui/transactions`. The Sui resolver auto-discovers IKA
            * coins owned by the sender (no pagination) and merges/splits as
            * needed to satisfy `balance`. Pick a value at least as large as
-           * one signing-fee charge for the network. `0n` is fine on networks
-           * with zero Ika fees (testnet, devnet); mainnet callers must pass
-           * a value covering the actual per-call fee.
+           * one signing-fee charge for the network.
            */
           balance: bigint | number;
           kind: 'with-balance';
@@ -104,10 +102,9 @@ export interface IkaSignerConfig {
      * How to source the IKA coin used to pay protocol fees in each PTB
      * (presign + sign txs).
      *
-     * When omitted, defaults to `{ kind: 'with-balance', balance: 0n }` —
-     * which works on networks where Ika fees are zero (testnet, devnet).
-     * On mainnet you MUST set this to a non-zero balance covering the
-     * per-call fee, or pass an explicit coin via `{ kind: 'object' }` /
+     * When omitted, defaults to `{ kind: 'with-balance', balance: 5 IKA }`
+     * (5 * 10^9 base units). Tighten or loosen by passing an explicit
+     * `with-balance`, or override entirely with `{ kind: 'object' }` /
      * `{ kind: 'callback' }`.
      */
     ikaCoin?: IkaCoinSource;

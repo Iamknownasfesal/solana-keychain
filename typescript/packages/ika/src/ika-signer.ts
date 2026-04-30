@@ -36,6 +36,12 @@ const DEFAULT_SIGN_POLL_TIMEOUT_MS = 60_000;
 const DEFAULT_SIGN_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PRESIGN_POLL_TIMEOUT_MS = 60_000;
 const DEFAULT_PRESIGN_POLL_INTERVAL_MS = 2_000;
+/**
+ * Default per-tx IKA fee budget when `ikaCoin` is omitted. Sized at 5 IKA
+ * (assuming 9 decimals), enough headroom to cover at least one sign-session
+ * fee on mainnet. Override `ikaCoin` to tighten or loosen.
+ */
+const DEFAULT_IKA_FEE_BALANCE = 5n * 10n ** 9n;
 
 /**
  * Create an Ika dWallet-backed signer for Solana ed25519 signing.
@@ -339,13 +345,12 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
      * Build the IKA coin argument used to pay protocol fees in a single PTB.
      *
      * Default behavior (no `ikaCoin` config) builds a coin via the
-     * `coinWithBalance` intent with `balance: 0n` — Sui auto-resolves a coin
-     * of the IKA type from the sender's wallet, merging/splitting as needed.
-     * Mainnet callers must override with a non-zero balance covering the
-     * per-call fee, or pass `{ kind: 'object' }` / `{ kind: 'callback' }`.
+     * `coinWithBalance` intent with `balance: 5 IKA` (5 * 10^9) — Sui
+     * auto-resolves IKA coins from the sender's wallet and merges/splits to
+     * satisfy the budget. Tighten or loosen via `ikaCoin`.
      */
     #buildIkaCoin(tx: Transaction): TransactionObjectArgument {
-        const source = this.ikaCoinSource ?? { balance: 0n, kind: 'with-balance' };
+        const source = this.ikaCoinSource ?? { balance: DEFAULT_IKA_FEE_BALANCE, kind: 'with-balance' };
         if (source.kind === 'object') {
             return tx.object(source.coinId);
         }
