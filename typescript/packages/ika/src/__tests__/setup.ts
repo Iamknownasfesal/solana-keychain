@@ -3,8 +3,6 @@ import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { getNetworkConfig, IkaClient, Network } from '@ika.xyz/sdk';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
-import { fromBase64 } from '@mysten/sui/utils';
-
 import { createIkaSigner } from '../ika-signer.js';
 import type { IkaSignerConfig } from '../types.js';
 
@@ -15,9 +13,9 @@ const SIGNER_TYPE = 'ika';
  *
  *  - `IKA_NETWORK`           — `'testnet'` or `'mainnet'` (passed to `getNetworkConfig`).
  *  - `SUI_RPC_URL`           — Sui fullnode URL matching that network.
- *  - `SUI_KEYPAIR_BASE64`    — base64-encoded Sui ed25519 keypair (output of
- *                              `sui keytool export <addr> --json | jq .privateKey`,
- *                              or any 32-byte secret-key encoded as base64).
+ *  - `SUI_KEYPAIR`           — Sui ed25519 secret key (Bech32 `suiprivkey1…`,
+ *                              the canonical export format from
+ *                              `sui keytool export <addr> --json`).
  *  - `IKA_DWALLET_ID`        — object ID of an Active ed25519 dWallet that the
  *                              keypair is authorised to sign with.
  *  - `IKA_SECRET_SHARE_HEX`  — hex-encoded user secret share for the dWallet.
@@ -29,7 +27,7 @@ const SIGNER_TYPE = 'ika';
 const REQUIRED_ENV_VARS = [
     'IKA_NETWORK',
     'SUI_RPC_URL',
-    'SUI_KEYPAIR_BASE64',
+    'SUI_KEYPAIR',
     'IKA_DWALLET_ID',
     'IKA_SECRET_SHARE_HEX',
     'IKA_PUBLIC_OUTPUT_HEX',
@@ -47,31 +45,42 @@ function hexToBytes(hex: string): Uint8Array {
     return bytes;
 }
 
-async function buildIkaSigner(): Promise<SolanaSigner> {
-    const network = process.env.IKA_NETWORK as Network;
-    const ikaConfig = getNetworkConfig(network);
-    const suiClient = new SuiJsonRpcClient({
-        network: network === 'mainnet' ? 'mainnet' : 'testnet',
-        url: process.env.SUI_RPC_URL!,
-    });
-    const ikaClient = new IkaClient({ config: ikaConfig, suiClient });
-    await ikaClient.initialize();
+// `runSignerIntegrationTest` calls `createSigner()` once per scenario.
+// Memoize so we only do the heavy IkaClient.initialize() multi-object fetch
+// once per process — public Sui fullnodes (e.g. testnet.sui.io) rate-limit
+// hard otherwise.
+let cachedSigner: Promise<SolanaSigner> | undefined;
 
-    const suiSigner = Ed25519Keypair.fromSecretKey(fromBase64(process.env.SUI_KEYPAIR_BASE64!));
+function buildIkaSigner(): Promise<SolanaSigner> {
+    if (!cachedSigner) {
+        cachedSigner = (async () => {
+            const network = process.env.IKA_NETWORK as Network;
+            const ikaConfig = getNetworkConfig(network);
+            const suiClient = new SuiJsonRpcClient({
+                network: network === 'mainnet' ? 'mainnet' : 'testnet',
+                url: process.env.SUI_RPC_URL!,
+            });
+            const ikaClient = new IkaClient({ config: ikaConfig, suiClient });
+            await ikaClient.initialize();
 
-    const config: IkaSignerConfig = {
-        dWalletId: process.env.IKA_DWALLET_ID!,
-        ikaClient,
-        shareSource: {
-            kind: 'secret-share',
-            publicOutput: hexToBytes(process.env.IKA_PUBLIC_OUTPUT_HEX!),
-            secretShare: hexToBytes(process.env.IKA_SECRET_SHARE_HEX!),
-        },
-        suiClient,
-        suiSigner,
-    };
+            const suiSigner = Ed25519Keypair.fromSecretKey(process.env.SUI_KEYPAIR!);
 
-    return await createIkaSigner(config);
+            const config: IkaSignerConfig = {
+                dWalletId: process.env.IKA_DWALLET_ID!,
+                ikaClient,
+                shareSource: {
+                    kind: 'secret-share',
+                    publicOutput: hexToBytes(process.env.IKA_PUBLIC_OUTPUT_HEX!),
+                    secretShare: hexToBytes(process.env.IKA_SECRET_SHARE_HEX!),
+                },
+                suiClient,
+                suiSigner,
+            };
+
+            return await createIkaSigner(config);
+        })();
+    }
+    return cachedSigner;
 }
 
 const CONFIG: SignerTestConfig<SolanaSigner> = {
