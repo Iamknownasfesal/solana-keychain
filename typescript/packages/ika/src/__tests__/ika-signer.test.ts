@@ -34,6 +34,7 @@ const ANOTHER_CURVE = 0;
 interface DWalletStub {
     curve: number;
     dwallet_cap_id: string;
+    encrypted_user_secret_key_shares: { id: string; size: string };
     id: string;
     state: {
         Active?: { public_output: number[] };
@@ -45,6 +46,7 @@ function makeDWallet(overrides: Partial<DWalletStub> = {}): DWalletStub {
     return {
         curve: ED25519_CURVE,
         dwallet_cap_id: '0xcap',
+        encrypted_user_secret_key_shares: { id: '0xtable', size: '0' },
         id: '0xdwallet',
         state: {
             Active: { public_output: Array.from(new Uint8Array(64).fill(2)) },
@@ -70,8 +72,9 @@ function makeIkaClient(overrides: Partial<Record<string, unknown>> = {}) {
 
 function makeSuiClient() {
     return {
-        signAndExecuteTransaction: vi.fn(),
         getCoins: vi.fn(),
+        getDynamicFields: vi.fn(),
+        signAndExecuteTransaction: vi.fn(),
     };
 }
 
@@ -212,6 +215,99 @@ describe('IkaSigner', () => {
                     code: 'SIGNER_REMOTE_API_ERROR',
                     message: expect.stringContaining('Failed to fetch dWallet'),
                 });
+            });
+        });
+    });
+
+    describe('on-chain-encrypted auto-resolve', () => {
+        const userShareEncryptionKeys = {
+            getSuiAddress: () => '0x000000000000000000000000000000000000000000000000000000000000ABCD',
+        } as unknown as IkaSignerConfig['userShareEncryptionKeys'];
+
+        function dynamicFieldEntry(addr: string, objectId: string) {
+            return {
+                digest: 'd',
+                name: { type: 'address', value: addr },
+                objectId,
+                objectType: 't',
+                type: 'DynamicField',
+                version: '1',
+            };
+        }
+
+        async function buildSigner(
+            suiClient: ReturnType<typeof makeSuiClient>,
+            shareSource: IkaSignerConfig['shareSource'],
+        ) {
+            return await IkaSigner.create(
+                makeConfig({
+                    shareSource,
+                    suiClient: suiClient as unknown as IkaSignerConfig['suiClient'],
+                    userShareEncryptionKeys,
+                }),
+            );
+        }
+
+        it('walks the dWallet table and returns the share registered for the caller address', async () => {
+            const suiClient = makeSuiClient();
+            suiClient.getDynamicFields.mockResolvedValueOnce({
+                data: [
+                    dynamicFieldEntry('0x1', '0xshare-other'),
+                    // intentionally not pre-padded — the resolver normalizes both sides
+                    dynamicFieldEntry('0xabcd', '0xshare-mine'),
+                ],
+                hasNextPage: false,
+                nextCursor: null,
+            });
+            const signer = await buildSigner(suiClient, { kind: 'on-chain-encrypted' });
+
+            const shareId = await (
+                signer as unknown as { _resolveOnChainEncryptedShareId(): Promise<string> }
+            )._resolveOnChainEncryptedShareId();
+
+            expect(shareId).toBe('0xshare-mine');
+            expect(suiClient.getDynamicFields).toHaveBeenCalledWith(expect.objectContaining({ parentId: '0xtable' }));
+        });
+
+        it('paginates through multiple pages until it finds the entry', async () => {
+            const suiClient = makeSuiClient();
+            suiClient.getDynamicFields
+                .mockResolvedValueOnce({
+                    data: [dynamicFieldEntry('0x1', '0xshare-other')],
+                    hasNextPage: true,
+                    nextCursor: 'cursor1',
+                })
+                .mockResolvedValueOnce({
+                    data: [dynamicFieldEntry('0xabcd', '0xshare-mine')],
+                    hasNextPage: false,
+                    nextCursor: null,
+                });
+            const signer = await buildSigner(suiClient, { kind: 'on-chain-encrypted' });
+
+            const shareId = await (
+                signer as unknown as { _resolveOnChainEncryptedShareId(): Promise<string> }
+            )._resolveOnChainEncryptedShareId();
+
+            expect(shareId).toBe('0xshare-mine');
+            expect(suiClient.getDynamicFields).toHaveBeenCalledTimes(2);
+        });
+
+        it('throws CONFIG_ERROR when no entry matches the caller address', async () => {
+            const suiClient = makeSuiClient();
+            suiClient.getDynamicFields.mockResolvedValueOnce({
+                data: [dynamicFieldEntry('0x1', '0xshare-other')],
+                hasNextPage: false,
+                nextCursor: null,
+            });
+            const signer = await buildSigner(suiClient, { kind: 'on-chain-encrypted' });
+
+            await expect(
+                (
+                    signer as unknown as { _resolveOnChainEncryptedShareId(): Promise<string> }
+                )._resolveOnChainEncryptedShareId(),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('no encrypted share registered'),
             });
         });
     });

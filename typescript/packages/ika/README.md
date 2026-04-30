@@ -93,7 +93,7 @@ const signature = await signMessage([signer], message);
 ### `IkaShareSource` variants
 
 - `{ kind: 'secret-share', secretShare, publicOutput }` — pre-decrypted bytes
-- `{ kind: 'on-chain-encrypted', encryptedShareId }` — fetch + decrypt with the `userShareEncryptionKeys` registered for the Sui address
+- `{ kind: 'on-chain-encrypted' }` — auto-resolve the encrypted share registered against `userShareEncryptionKeys.getSuiAddress()`, then decrypt. Pin a specific share with `encryptedShareId` to skip the lookup.
 - `{ kind: 'public-share' }` — Shared dWallets, or ZeroTrust dWallets whose share has been made public
 
 ### `IkaPresignMode` variants

@@ -15,7 +15,7 @@ import {
 } from '@ika.xyz/sdk';
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 import { coinWithBalance, Transaction, TransactionObjectArgument } from '@mysten/sui/transactions';
-import { fromBase64 } from '@mysten/sui/utils';
+import { fromBase64, normalizeSuiAddress } from '@mysten/sui/utils';
 import { Address, address as addressFromBase58, getAddressDecoder } from '@solana/addresses';
 import {
     assertSignatureValid,
@@ -297,9 +297,8 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
                     secretShare: this.shareSource.secretShare,
                 };
             case 'on-chain-encrypted': {
-                const encrypted = await this.ikaClient.getEncryptedUserSecretKeyShare(
-                    this.shareSource.encryptedShareId,
-                );
+                const shareId = this.shareSource.encryptedShareId ?? (await this._resolveOnChainEncryptedShareId());
+                const encrypted = await this.ikaClient.getEncryptedUserSecretKeyShare(shareId);
                 return { encryptedUserSecretKeyShare: encrypted };
             }
             case 'public-share':
@@ -351,6 +350,41 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         return await this.ikaClient.getPresignInParticularState(presignId, 'Completed', {
             interval: this.presignPollIntervalMs,
             timeout: this.presignPollTimeoutMs,
+        });
+    }
+
+    /**
+     * Walk the dWallet's `encrypted_user_secret_key_shares` ObjectTable and
+     * return the share ID registered against the caller's encryption-key
+     * address (`userShareEncryptionKeys.getSuiAddress()`). Used when the
+     * caller selects `on-chain-encrypted` mode without pinning an explicit
+     * `encryptedShareId`.
+     */
+    private async _resolveOnChainEncryptedShareId(): Promise<string> {
+        if (!this.userShareEncryptionKeys) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message:
+                    'Cannot auto-resolve encrypted share without userShareEncryptionKeys; supply encryptedShareId or userShareEncryptionKeys',
+            });
+        }
+        const expected = normalizeSuiAddress(this.userShareEncryptionKeys.getSuiAddress());
+        const tableId = this.dWallet.encrypted_user_secret_key_shares.id;
+
+        let cursor: string | null | undefined;
+        do {
+            const page = await this.suiClient.getDynamicFields({ cursor, parentId: tableId });
+            for (const entry of page.data) {
+                if (entry.name.type !== 'address') continue;
+                const candidate = normalizeSuiAddress(String(entry.name.value));
+                if (candidate === expected) return entry.objectId;
+            }
+            cursor = page.hasNextPage ? page.nextCursor : undefined;
+        } while (cursor);
+
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            dWalletId: this.dWallet.id,
+            encryptionKeyAddress: expected,
+            message: `dWallet ${this.dWallet.id} has no encrypted share registered for ${expected}; register one via the Ika SDK first or pass encryptedShareId explicitly`,
         });
     }
 

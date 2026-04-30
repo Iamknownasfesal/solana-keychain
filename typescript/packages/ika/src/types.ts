@@ -12,6 +12,22 @@ import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 export type IkaShareSource =
     | {
           /**
+           * Optional: pin a specific `EncryptedUserSecretKeyShare` object ID.
+           * When omitted, the signer auto-resolves the share registered for
+           * `userShareEncryptionKeys.getSuiAddress()` by walking the dWallet's
+           * `encrypted_user_secret_key_shares` table.
+           */
+          encryptedShareId?: string;
+          /**
+           * Fetch the caller's encrypted share from chain and let the Ika SDK
+           * decrypt it using `userShareEncryptionKeys` (passed at signer
+           * construction). Recommended for ZeroTrust dWallets when the caller
+           * has already registered an encryption key under their Sui address.
+           */
+          kind: 'on-chain-encrypted';
+      }
+    | {
+          /**
            * The dWallet itself carries `public_user_secret_key_share` (Shared
            * dWallet, or a ZeroTrust dWallet that has had its share made public).
            * No extra data needed — the SDK reads it from the dWallet object.
@@ -23,16 +39,6 @@ export type IkaShareSource =
           kind: 'secret-share';
           publicOutput: Uint8Array;
           secretShare: Uint8Array;
-      }
-    | {
-          encryptedShareId: string;
-          /**
-           * Fetch a specific encrypted share from chain by ID and let the Ika
-           * SDK decrypt it using `userShareEncryptionKeys` (passed at signer
-           * construction). Recommended for ZeroTrust dWallets when the caller
-           * has already registered an encryption key under their Sui address.
-           */
-          kind: 'on-chain-encrypted';
       };
 
 /**
