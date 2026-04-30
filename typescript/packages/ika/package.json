@@ -1,0 +1,67 @@
+{
+    "name": "@solana/keychain-ika",
+    "author": "dWallet Labs",
+    "version": "0.1.0",
+    "description": "Ika dWallet (2PC-MPC) signer for Solana transactions",
+    "license": "MIT",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
+    "keywords": [
+        "solana",
+        "signing",
+        "wallet",
+        "ika",
+        "dwallet",
+        "mpc",
+        "2pc-mpc"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "build": "tsc --build",
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "prepack": "pnpm run build",
+        "test": "vitest run",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
+        "test:integration": "vitest run --config ../../vitest.config.integration.ts",
+        "test:watch": "vitest",
+        "test:watch:unit": "vitest --config ../../vitest.config.unit.ts",
+        "test:watch:integration": "vitest --config ../../vitest.config.integration.ts",
+        "typecheck": "tsc --noEmit",
+        "test:treeshakability": "agadoo dist/index.js"
+    },
+    "dependencies": {
+        "@solana/keychain-core": "workspace:*"
+    },
+    "peerDependencies": {
+        "@ika.xyz/sdk": ">=0.3.1",
+        "@mysten/sui": ">=2.5.0",
+        "@solana/addresses": ">=6.0.1",
+        "@solana/keys": ">=6.0.1",
+        "@solana/signers": ">=6.0.1",
+        "@solana/transactions": ">=6.0.1"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "devDependencies": {
+        "@ika.xyz/sdk": "^0.3.1",
+        "@mysten/sui": "^2.5.0",
+        "@solana/addresses": "^6.0.1",
+        "@solana/keychain-test-utils": "workspace:*",
+        "@solana/keys": "^6.0.1",
+        "@solana/signers": "^6.0.1",
+        "@solana/transactions": "^6.0.1"
+    }
+}
