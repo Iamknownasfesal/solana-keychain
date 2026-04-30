@@ -226,7 +226,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         });
         const verifiedPresignCap = ikaTx.verifyPresignCap({ presign });
 
-        const ikaCoin = this.#buildIkaCoin(suiTx);
+        const ikaCoin = await this.#buildIkaCoin(suiTx);
 
         await ikaTx.requestSign({
             dWallet: this.dWallet,
@@ -240,8 +240,6 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             signatureScheme: SignatureAlgorithm.EdDSA,
             suiCoin: suiTx.gas,
         });
-
-        this.#cleanupIkaCoin(suiTx, ikaCoin);
 
         const signId = await this.#executeAndExtractEventId(suiTx, 'SignRequestEvent', 'sign_id');
 
@@ -315,7 +313,7 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             ikaClient: this.ikaClient,
             transaction: presignTx,
         });
-        const ikaCoin = this.#buildIkaCoin(presignTx);
+        const ikaCoin = await this.#buildIkaCoin(presignTx);
         const unverifiedPresignCap = ikaTx.requestGlobalPresign({
             curve: Curve.ED25519,
             dwalletNetworkEncryptionKeyId: networkKey.id,
@@ -328,7 +326,6 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         // sign tx will re-fetch + verify it.
         const senderAddress = this.suiSigner.toSuiAddress();
         presignTx.transferObjects([unverifiedPresignCap], senderAddress);
-        this.#cleanupIkaCoin(presignTx, ikaCoin);
 
         const presignId = await this.#executeAndExtractEventId(presignTx, 'PresignRequestEvent', 'presign_id');
 
@@ -339,39 +336,42 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
     }
 
     /**
-     * Build the IKA coin argument for a single PTB. Defaults to an empty
-     * (zero-balance) coin created in-PTB — only valid on networks where Ika
-     * fees are zero (testnet, devnet). Mainnet callers must pass `ikaCoin` in
-     * the config to reference a funded coin object.
+     * Build the IKA coin argument used to pay protocol fees in a single PTB.
+     *
+     * Default behavior (no `ikaCoin` config) is to query the wallet for IKA
+     * coins via `suiClient.getCoins`, merge them in-PTB if there are several
+     * (so the move call sees a single coin with the wallet's full balance),
+     * and return the merged coin. Move calls take the coin by `&mut`, so
+     * leftover balance stays in the same on-chain object.
      */
-    #buildIkaCoin(tx: Transaction): TransactionObjectArgument {
+    async #buildIkaCoin(tx: Transaction): Promise<TransactionObjectArgument> {
         const source = this.ikaCoinSource;
-        if (!source) {
-            return tx.moveCall({
-                arguments: [],
-                target: '0x2::coin::zero',
-                typeArguments: [`${this.ikaClient.ikaConfig.packages.ikaPackage}::ika::IKA`],
-            });
-        }
-        if (source.kind === 'object') {
+        if (source?.kind === 'object') {
             return tx.object(source.coinId);
         }
-        return source.build(tx);
-    }
+        if (source?.kind === 'callback') {
+            return source.build(tx);
+        }
 
-    /**
-     * Cleanup the per-tx IKA coin after the move call. Only the empty-coin
-     * default needs cleanup (`destroy_zero`). For caller-provided coins we
-     * leave them in place: mainnet move calls take the coin by `&mut` and
-     * leave a leftover balance the caller still owns.
-     */
-    #cleanupIkaCoin(tx: Transaction, coin: TransactionObjectArgument): void {
-        if (this.ikaCoinSource) return;
-        tx.moveCall({
-            arguments: [coin],
-            target: '0x2::coin::destroy_zero',
-            typeArguments: [`${this.ikaClient.ikaConfig.packages.ikaPackage}::ika::IKA`],
-        });
+        const owner = this.suiSigner.toSuiAddress();
+        const coinType = `${this.ikaClient.ikaConfig.packages.ikaPackage}::ika::IKA`;
+        const { data: coins } = await this.suiClient.getCoins({ coinType, owner });
+        const [head, ...rest] = coins;
+        if (!head) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                coinType,
+                message: `Wallet ${owner} holds no ${coinType} coins to pay Ika protocol fees with`,
+                owner,
+            });
+        }
+        const primary = tx.object(head.coinObjectId);
+        if (rest.length > 0) {
+            tx.mergeCoins(
+                primary,
+                rest.map(coin => tx.object(coin.coinObjectId)),
+            );
+        }
+        return primary;
     }
 
     /**

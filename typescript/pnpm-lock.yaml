@@ -302,8 +302,8 @@ importers:
         version: link:../core
     devDependencies:
       '@ika.xyz/sdk':
-        specifier: ^0.3.1
-        version: 0.3.1(typescript@5.9.3)
+        specifier: ^0.4.0
+        version: 0.4.0(typescript@5.9.3)
       '@mysten/sui':
         specifier: ^2.5.0
         version: 2.16.0(typescript@5.9.3)
@@ -1147,8 +1147,8 @@ packages:
   '@ika.xyz/ika-wasm@0.2.1':
     resolution: {integrity: sha512-Zq528aTdAHA7mW4+vqUoc/fhornMo8EHcS8hKJx1ZBs9tAepWw07ZReMsZuCtQRmpi1vmYh2mIi2PhZRV0M4dA==}
 
-  '@ika.xyz/sdk@0.3.1':
-    resolution: {integrity: sha512-RJRYURWbnPN8RSCNc4RPBmLwhYZhtsaUy5PGXfjANXD0YK5YM56deWaBdgamZl8KVSRMGXWKIDe/s3h3LWbCIw==}
+  '@ika.xyz/sdk@0.4.0':
+    resolution: {integrity: sha512-lAAsw3wjFC7OGAjl8ClziabztOfMrntFxf5fta9pNF0x4d67iX3W0g0Gv84h9FJ1uTGPAisTQt/gG/TJoGElgA==}
     engines: {node: '>=18'}
 
   '@isaacs/cliui@8.0.2':
@@ -4894,13 +4894,13 @@ snapshots:
 
   '@ika.xyz/ika-wasm@0.2.1': {}
 
-  '@ika.xyz/sdk@0.3.1(typescript@5.9.3)':
+  '@ika.xyz/sdk@0.4.0(typescript@5.9.3)':
     dependencies:
       '@ika.xyz/ika-wasm': 0.2.1
       '@mysten/bcs': 2.0.3
       '@mysten/sui': 2.16.0(typescript@5.9.3)
-      '@noble/curves': 2.0.1
-      '@noble/hashes': 2.0.1
+      '@noble/curves': 2.2.0
+      '@noble/hashes': 2.2.0
     transitivePeerDependencies:
       - '@gql.tada/svelte-support'
       - '@gql.tada/vue-support'

@@ -89,13 +89,15 @@ export interface IkaSignerConfig {
     ikaClient: IkaClient;
     /**
      * How to source the IKA coin used to pay protocol fees in each PTB
-     * (presign + sign txs). When omitted, defaults to a zero-balance coin
-     * created in-PTB via `0x2::coin::zero<IKA>()` and destroyed afterwards —
-     * which only works on networks where Ika fees are zero (testnet, devnet).
+     * (presign + sign txs).
      *
-     * On mainnet, callers MUST supply a funded IKA coin. The coin is taken
-     * by `&mut`, so the same coin object can be reused across many sign
-     * sessions until its balance is depleted.
+     * When omitted, the signer auto-discovers IKA coins owned by
+     * `suiSigner.toSuiAddress()` via `suiClient.getCoins`, merges them
+     * in-PTB if there are several, and uses the result as the fee coin.
+     * Throws if the wallet holds no IKA.
+     *
+     * Override with `{ kind: 'object' }` to pin a specific coin or with
+     * `{ kind: 'callback' }` to integrate a custom coin-management strategy.
      */
     ikaCoin?: IkaCoinSource;
     /** Default: `{ kind: 'per-sign-global' }`. */
