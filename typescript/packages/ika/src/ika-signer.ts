@@ -1,4 +1,5 @@
 import {
+    CoordinatorInnerModule,
     Curve,
     EncryptedUserSecretKeyShare,
     Hash,
@@ -6,6 +7,7 @@ import {
     IkaTransaction,
     Presign,
     publicKeyFromDWalletOutput,
+    SessionsManagerModule,
     SharedDWallet,
     SignatureAlgorithm,
     UserShareEncryptionKeys,
@@ -13,6 +15,7 @@ import {
 } from '@ika.xyz/sdk';
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 import { coinWithBalance, Transaction, TransactionObjectArgument } from '@mysten/sui/transactions';
+import { fromBase64 } from '@mysten/sui/utils';
 import { Address, address as addressFromBase58, getAddressDecoder } from '@solana/addresses';
 import {
     assertSignatureValid,
@@ -247,7 +250,12 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             suiCoin: suiTx.gas,
         });
 
-        const signId = await this._executeAndExtractEventId(suiTx, 'SignRequestEvent', 'sign_id');
+        const signEvent = await this._executeAndExtractEvent(
+            suiTx,
+            'SignRequestEvent',
+            CoordinatorInnerModule.SignRequestEvent,
+        );
+        const signId = signEvent.event_data.sign_id;
 
         const signObject = await this.ikaClient.getSignInParticularState(
             signId,
@@ -333,7 +341,12 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
         const senderAddress = this.suiSigner.toSuiAddress();
         presignTx.transferObjects([unverifiedPresignCap], senderAddress);
 
-        const presignId = await this._executeAndExtractEventId(presignTx, 'PresignRequestEvent', 'presign_id');
+        const presignEvent = await this._executeAndExtractEvent(
+            presignTx,
+            'PresignRequestEvent',
+            CoordinatorInnerModule.PresignRequestEvent,
+        );
+        const presignId = presignEvent.event_data.presign_id;
 
         return await this.ikaClient.getPresignInParticularState(presignId, 'Completed', {
             interval: this.presignPollIntervalMs,
@@ -362,15 +375,23 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
     }
 
     /**
-     * Sign + execute a Sui transaction with the user's `suiSigner`, then walk
-     * the resulting events to find the named MPC event and pull `idField` out
-     * of its parsed JSON.
+     * Sign + execute a Sui transaction with the user's `suiSigner`, locate the
+     * MPC initiator event matching `eventTypeSubstring`, and BCS-decode it
+     * using the supplied `eventSchema`.
+     *
+     * Mirrors the canonical pattern used by the Ika SDK's integration helpers:
+     * read `event.bcs` (base64) and parse via
+     * `SessionsManagerModule.DWalletSessionEvent(<inner>)`. This is more robust
+     * than walking `parsedJson` because BCS schemas survive field renames in
+     * the Move source.
      */
-    private async _executeAndExtractEventId(
+    private async _executeAndExtractEvent<
+        TInner extends Parameters<typeof SessionsManagerModule.DWalletSessionEvent>[0],
+    >(
         suiTx: Transaction,
         eventTypeSubstring: string,
-        idField: string,
-    ): Promise<string> {
+        innerSchema: TInner,
+    ): Promise<ReturnType<ReturnType<typeof SessionsManagerModule.DWalletSessionEvent<TInner>>['parse']>> {
         let result;
         try {
             result = await this.suiClient.signAndExecuteTransaction({
@@ -385,18 +406,13 @@ export class IkaSigner<TAddress extends string = string> implements SolanaSigner
             });
         }
 
-        const events = result.events ?? [];
-        for (const event of events) {
-            if (!event.type.includes(eventTypeSubstring)) continue;
-            const parsed = event.parsedJson as Record<string, unknown> | undefined;
-            const eventData = parsed?.event_data as Record<string, unknown> | undefined;
-            const candidate = eventData?.[idField] ?? parsed?.[idField];
-            if (typeof candidate === 'string') return candidate;
+        const event = result.events?.find(candidate => candidate.type.includes(eventTypeSubstring));
+        if (!event?.bcs) {
+            throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                eventType: eventTypeSubstring,
+                message: `Sui tx executed but no ${eventTypeSubstring} (with bcs payload) found in events`,
+            });
         }
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            eventType: eventTypeSubstring,
-            field: idField,
-            message: `Sui tx executed but no ${eventTypeSubstring}.${idField} found in events`,
-        });
+        return SessionsManagerModule.DWalletSessionEvent(innerSchema).parse(fromBase64(event.bcs));
     }
 }
