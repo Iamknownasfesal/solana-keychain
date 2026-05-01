@@ -5,6 +5,13 @@ ed25519 address with a 2PC-MPC dWallet on the Ika network — every signature is
 co-produced by the user (centralized party) and the Ika committee (decentralized
 party), so no single machine ever holds the full key.
 
+> **Status:** Today this package signs Solana transactions using dWallets on
+> the Ika network deployed on Sui (testnet + mainnet both live; pass the
+> matching network name to `getNetworkConfig` and a corresponding Sui RPC
+> URL). Ika is also coming to Solana — once it launches there, the same
+> signer will be able to sign against an Ika network deployed on Solana, with
+> only the network config changing.
+
 ## Installation
 
 ```bash
@@ -117,7 +124,7 @@ const signature = await signMessage([signer], message);
 
 1. **No DKG inside the signer.** Provision dWallets via the `ika` CLI / SDK; this package only signs.
 2. **Curve scope.** Only ed25519 / EdDSA / SHA512 (Solana). Other curves throw at construction.
-3. **Mainnet IKA fees.** The default `ikaCoin` budget is 5 IKA — make sure the wallet holds enough, or override the budget. Fees on testnet/devnet are typically zero.
+3. **IKA fees are real on every network.** Each presign + sign cycle debits IKA from the fee coin — one charge for the presign tx, one for the sign tx. The default `ikaCoin` budget is 5 IKA per PTB; make sure the wallet holds enough IKA on both testnet and mainnet. Fund testnet wallets via the Ika faucet.
 4. **Encrypted shares require a registered encryption key.** The `userShareEncryptionKeys` you pass must match the encryption key registered against `suiSigner.toSuiAddress()` for the dWallet's encrypted share.
 
 ## License
